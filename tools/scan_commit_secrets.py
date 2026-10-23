@@ -38,6 +38,13 @@ def scan(root: Path, base: str, head: str, tool: str, *, event: str = "push") ->
     version = subprocess.run([tool, "version"], check=True, capture_output=True, text=True).stdout.strip()
     if version != VERSION:
         raise ValueError("Unexpected Gitleaks CLI version")
+    commit_range = base + ".." + head
+    # Gitleaks can report success after Git fails to read a patch. Independently
+    # prove the same merge-inclusive range is readable; discard every patch byte.
+    subprocess.run([
+        "git", "-C", str(root), "log", "--patch", "--diff-merges=first-parent",
+        "--no-ext-diff", "--no-textconv", "--no-color", commit_range,
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     with tempfile.TemporaryDirectory(prefix="paltrin-secret-guard-") as temporary:
         stage = Path(temporary)
         config = stage / "gitleaks.toml"
@@ -48,7 +55,7 @@ def scan(root: Path, base: str, head: str, tool: str, *, event: str = "push") ->
         result = subprocess.run([
             tool, "git", str(root), "--config", str(config),
             "--gitleaks-ignore-path", str(ignores), "--ignore-gitleaks-allow",
-            "--log-opts=" + base + ".." + head, "--redact=100", "--no-banner",
+            "--log-opts=--diff-merges=first-parent " + commit_range, "--redact=100", "--no-banner",
             "--no-color", "--report-format", "json", "--report-path", str(report),
         ], cwd=stage, capture_output=True, text=True)
         if result.returncode not in (0, 1):
